@@ -7,6 +7,7 @@ import { RecipesService } from '../recipes/recipes.service';
 
 const newRecipeSlug = '/api/objects/recipes';
 const newIngredientSlug = '/api/objects/recipes_pos';
+const userFieldSlug = (id) => `/api/userfields/recipes/${id}`;
 const newImageSlug = (uid) => `/api/files/recipepictures/${uid}`;
 
 interface RequestWithUserInfo extends Request {
@@ -31,14 +32,13 @@ export class GrocyService {
 
   async createRecipeInGrocy(name: string, steps: string[]) {
     this.logger.log(name);
-    const parsedSteps = this.parseSteps(steps);
 
     try {
       const { data } = await axios.post(
         `${this.grocyBase}${newRecipeSlug}`,
         {
           name: name,
-          description: parsedSteps,
+          description: this.parseSteps(steps),
         },
         {
           headers: {
@@ -48,6 +48,25 @@ export class GrocyService {
       );
       this.logger.log(data);
       return data;
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async updateRecipeUserFields(recipeId: string, url: string) {
+    try {
+      axios.put(
+        `${this.grocyBase}${userFieldSlug(recipeId)}`,
+        {
+          url: url,
+        },
+        {
+          headers: {
+            'GROCY-API-KEY': this.grocyKey,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
     } catch (e) {
       throw e;
     }
@@ -130,6 +149,10 @@ export class GrocyService {
         addRecipeToGrocyDto.steps,
       );
       const { created_object_id } = data;
+      await this.updateRecipeUserFields(
+        created_object_id,
+        addRecipeToGrocyDto.url,
+      );
       await this.associateIngredientsWithRecipe(
         created_object_id,
         addRecipeToGrocyDto.ingredients,

@@ -9,6 +9,7 @@ export class AddRecipeToGrocyDto {
   _id: string;
   name: string;
   steps: string[];
+  url: string;
   ingredients: Ingredient[];
   imageUrl: string;
 }

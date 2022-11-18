@@ -13,14 +13,17 @@ import {
   TableRow,
   TextField,
 } from "@mui/material";
-import { Product } from "../types/types";
+import { Product, QuantityUnit, QuantityUnitConversion } from "../types/types";
+
+import { NormalizedLevenshtein } from "string-metric";
 
 interface PropTypes {
   index: number;
   ingredient: string;
   grocyBase: string;
-  products: Array<any>;
-  quantityUnits: Array<any>;
+  products: Array<Product>;
+  quantityUnits: Array<QuantityUnit>;
+  quantityUnitConversions: Array<QuantityUnitConversion>;
   isLoaded: boolean;
   updateMasterMap: Function;
   refreshProducts: Function;
@@ -33,6 +36,7 @@ export function IngredientRow(props: PropTypes) {
     grocyBase,
     products,
     quantityUnits,
+    quantityUnitConversions,
     isLoaded,
     updateMasterMap,
     refreshProducts,
@@ -47,9 +51,15 @@ export function IngredientRow(props: PropTypes) {
   }
 
   const [useAnyUnit, setUseAnyUnit] = useState<boolean>(false);
-  const [grocyProductId, setGrocyProductId] = useState<string>("");
-  const [quantity, setQuantity] = useState<string>();
-  const [quantityUnitId, setQuantityUnitId] = useState<string>("");
+  const [product, setProduct] = useState<Product | undefined>(undefined);
+  const [quantity, setQuantity] = useState<Number | undefined>();
+  const [quantityUnit, setQuantityUnit] = useState<QuantityUnit | undefined>(
+    undefined
+  );
+  const [availableQuantityUnits, setAvailableQuantityUnits] = useState<
+    QuantityUnit[]
+  >([]);
+
   const [isConfirmed, setIsConfirmed] = useState<boolean>(false);
   const [isIgnored, setIsIgnored] = useState<boolean>(false);
   const [noProducts, setNoProducts] = useState<boolean>(false);
@@ -72,7 +82,10 @@ export function IngredientRow(props: PropTypes) {
       }
     });
 
-    setGrocyProductId(highestProductId.toString());
+    const product = productList.find(
+      (x: Product) => x.id == highestProductId.toString()
+    );
+    setProduct(product);
   }
 
   async function logEvent(event: any) {
@@ -84,61 +97,35 @@ export function IngredientRow(props: PropTypes) {
     }
   }
 
-  interface QuantityUnitDropdownPropTypes {
-    disabled: boolean;
-  }
-
-  interface GrocyProduct {
-    id: string;
-    name: string;
-  }
-
-  const QuantityUnitDropdown = ({
-    disabled,
-  }: QuantityUnitDropdownPropTypes) => (
-    <Select
-      onChange={(event: SelectChangeEvent) =>
-        setQuantityUnitId(event.target.value)
-      }
-      disabled={disabled}
-      value={quantityUnitId}
-      // label="Quantity Unit"
-    >
-      {quantityUnits.map((unit) => (
-        <MenuItem key={unit.id} value={unit.id}>
-          {unit.name}
-        </MenuItem>
-      ))}
-    </Select>
-  );
-
   const toggleAnyUnit = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.checked) {
       setUseAnyUnit(true);
     } else {
       setUseAnyUnit(false);
-      setQuantityUnitId(getQuantityUnitByProductId(grocyProductId).id);
-    }
-  };
-
-  const getQuantityUnitByProductId = (productId: string) => {
-    for (const prod of products) {
-      if (prod.id == productId) {
-        for (const quant of quantityUnits) {
-          if (quant.id == prod.qu_id_stock) {
-            return quant;
-          }
-        }
-      }
+      setQuantityUnit(quantityUnits.find((x) => x.id == product!.qu_id_stock));
     }
   };
 
   const handleConfirm = () => {
+    if (!product) return;
+    if (!quantityUnit) return;
+
+    let quantity_adjusted = Number(quantity);
+    if (!useAnyUnit && product.qu_id_stock != quantityUnit.id) {
+      const factor = quantityUnitConversions.find(
+        (quc) =>
+          product.qu_id_stock == quc.to_qu_id &&
+          quantityUnit.id == quc.from_qu_id
+      )?.factor;
+      quantity_adjusted = quantity_adjusted *= Number(factor);
+      console.log(quantity_adjusted);
+    }
+
     updateMasterMap(index, {
-      grocyProductId: grocyProductId,
-      quantity: quantity,
+      grocyProductId: product.id,
+      quantity: quantity_adjusted.toString(),
       useAnyUnit: useAnyUnit,
-      quantityUnitId: quantityUnitId,
+      quantityUnitId: quantityUnit.id,
       isConfirmed: !isConfirmed,
       isIgnored: false,
     });
@@ -152,34 +139,106 @@ export function IngredientRow(props: PropTypes) {
     setIsIgnored(!isIgnored);
   };
 
-  const handleAutocompleteChange = (
+  const handleProductChange = (
     event: SyntheticEvent,
-    value: AutocompleteValue<GrocyProduct, false, false, false>,
+    value: AutocompleteValue<Product, false, false, false>,
     reason: AutocompleteChangeReason
   ) => {
-    if (reason === "removeOption") setGrocyProductId("");
+    if (reason === "removeOption") {
+      console.log("removereason");
+    } //setProduct(undefined);
     else {
-      // @ts-ignore
-      setGrocyProductId(value.id);
+      if (value) setProduct(value);
     }
   };
 
-  useEffect(() => {
-    if (isLoaded && products.length !== 0) {
-      setGrocyProductId(products[0].id);
-      // @ts-ignore
-      setQuantity(ingredient.match(/^\d+/) ? ingredient.match(/^\d+/)[0] : "");
-      setIsReadyToRender(true);
-    } else if (products.length === 0) {
-      setNoProducts(true);
-      setIsReadyToRender(true);
+  function guessQuantity() {
+    const match = ingredient.match(/^\d+/);
+    if (match && match.length > 0) {
+      setQuantity(Number(match[0]));
+      return;
     }
-  }, [isLoaded]);
+    setQuantity(0);
+  }
 
   useEffect(() => {
-    if (grocyProductId === "") return;
-    setQuantityUnitId(getQuantityUnitByProductId(grocyProductId).id);
-  }, [grocyProductId]);
+    if (products.length === 0) {
+      setNoProducts(true);
+      setIsReadyToRender(true);
+      return;
+    }
+
+    if (!isLoaded) return;
+    if (!ingredient) return;
+
+    // guess quantity
+    guessQuantity();
+    guessProduct();
+    setIsReadyToRender(true);
+  }, [isLoaded]);
+
+  function guessProduct() {
+    let split = ingredient.split(" ");
+    let last_part = split[split.length - 1];
+    console.log(last_part);
+
+    let best_similarity = 0;
+    let best_product = products[0];
+    const instance = new NormalizedLevenshtein();
+    products.forEach((p) => {
+      const sim = instance.similarity(last_part, p.name);
+      if (sim > best_similarity) {
+        best_similarity = sim;
+        best_product = p;
+        console.log(
+          `found new candidate ${best_product.name} with similarity ${best_similarity}`
+        );
+      }
+    });
+
+    setProduct(best_product);
+  }
+
+  useEffect(() => {
+    if (!product) return;
+    const resultingUnit = quantityUnits.filter(
+      (qu) => product.qu_id_stock == qu.id
+    );
+    const conversion_units = quantityUnitConversions
+      .filter(
+        (quc) => quc.product_id == null && quc.from_qu_id == product.qu_id_stock
+      )
+      .map((quc) => quantityUnits.filter((qu) => qu.id == quc.to_qu_id))
+      .flat();
+
+    setAvailableQuantityUnits(resultingUnit.concat(conversion_units));
+    setQuantityUnit(quantityUnits.find((x) => x.id == product.qu_id_stock));
+  }, [product]);
+
+  interface QuantityUnitDropdownPropTypes {
+    useAnyUnit: boolean;
+    disabled: boolean;
+  }
+
+  const QuantityUnitDropdown = ({
+    useAnyUnit,
+    disabled,
+  }: QuantityUnitDropdownPropTypes) => (
+    <Select
+      onChange={(event: SelectChangeEvent) =>
+        setQuantityUnit(quantityUnits.find((x) => x.id == event.target.value))
+      }
+      disabled={disabled}
+      value={quantityUnit?.id}
+      label="Quantity Unit"
+    >
+      {(useAnyUnit ? quantityUnits : availableQuantityUnits).map((unit) => (
+        <MenuItem key={unit.id} value={unit.id}>
+          {unit.name}
+        </MenuItem>
+      ))}
+    </Select>
+  );
 
   return isReadyToRender ? (
     noProducts ? (
@@ -197,10 +256,8 @@ export function IngredientRow(props: PropTypes) {
             options={products}
             getOptionLabel={(product) => product.name}
             renderInput={(params) => <TextField {...params} label="Product" />}
-            onChange={handleAutocompleteChange}
-            value={
-              products.filter((product) => product.id === grocyProductId)[0]
-            }
+            onChange={handleProductChange}
+            value={product}
             disableClearable
             sx={{ minWidth: 200 }}
           />
@@ -208,11 +265,7 @@ export function IngredientRow(props: PropTypes) {
         <TableCell>
           <Input
             value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
-            placeholder={
-              //@ts-ignore
-              ingredient.match(/^\d+/) ? ingredient.match(/^\d+/)[0] : ""
-            }
+            onChange={(event) => setQuantity(Number(event.target.value))}
             disabled={isConfirmed || isIgnored}
           />
         </TableCell>
@@ -224,11 +277,10 @@ export function IngredientRow(props: PropTypes) {
           />
         </TableCell>
         <TableCell>
-          {useAnyUnit ? (
-            <QuantityUnitDropdown disabled={isConfirmed || isIgnored} />
-          ) : (
-            <QuantityUnitDropdown disabled={true} />
-          )}
+          <QuantityUnitDropdown
+            useAnyUnit={useAnyUnit}
+            disabled={isConfirmed || isIgnored}
+          />
         </TableCell>
 
         <TableCell>

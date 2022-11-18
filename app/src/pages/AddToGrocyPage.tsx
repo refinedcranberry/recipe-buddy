@@ -17,7 +17,13 @@ import {
 } from "@mui/material";
 import { Fragment, useEffect, useState } from "react";
 import axios from "axios";
-import { Ingredient, Product, QuantityUnit, Recipe } from "../types/types";
+import {
+  Ingredient,
+  Product,
+  QuantityUnit,
+  QuantityUnitConversion,
+  Recipe,
+} from "../types/types";
 import { IngredientRow } from "../components/IngredientRow";
 import { useAtom } from "jotai";
 import { rbTheme } from "../styles/styles";
@@ -32,6 +38,8 @@ export function AddToGrocyPage() {
   const navigate = useNavigate();
   const getProductsSlug = "/api/objects/products";
   const getQuantityUnitsSlug = "/api/objects/quantity_units";
+  const getQuantityUnitConversionsSlug =
+    "/api/objects/quantity_unit_conversions";
 
   const [grocyBase, setGrocyBase] = useState<string>("");
   const [grocyKey, setGrocyKey] = useState<string>("");
@@ -39,12 +47,17 @@ export function AddToGrocyPage() {
   const [recipe, setRecipe] = useState<Recipe>();
   const [products, setProducts] = useState<Product[]>([]);
   const [quantityUnits, setQuantityUnits] = useState<QuantityUnit[]>([]);
+  const [quantityUnitConversions, setQuantityUnitConversions] = useState<
+    QuantityUnitConversion[]
+  >([]);
 
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
   const [recipeLoaded, setRecipeLoaded] = useState<boolean>(false);
   const [productsLoaded, setProductsLoaded] = useState<boolean>(false);
   const [unitsLoaded, setUnitsLoaded] = useState<boolean>(false);
+  const [unitConversionsLoaded, setUnitConversionsLoaded] =
+    useState<boolean>(false);
 
   const [
     allIngredientsConfirmedOrIgnored,
@@ -116,6 +129,17 @@ export function AddToGrocyPage() {
     setUnitsLoaded(true);
   }
 
+  async function getQuantityUnitConversions() {
+    const { data } = await axios.get(
+      `${grocyBase}${getQuantityUnitConversionsSlug}`,
+      {
+        headers: { "GROCY-API-KEY": grocyKey },
+      }
+    );
+    setQuantityUnitConversions(data);
+    setUnitConversionsLoaded(true);
+  }
+
   function areAllIngredientsConfirmedOrIgnored() {
     try {
       masterMap.forEach((value) => {
@@ -158,6 +182,7 @@ export function AddToGrocyPage() {
           _id: recipe?._id,
           name: recipe?.name,
           steps: recipe?.steps,
+          url: recipe?.url,
           imageUrl: recipe?.imageUrl,
           ingredients: completedIngredients,
         },
@@ -192,6 +217,7 @@ export function AddToGrocyPage() {
     retrieveRecipe();
     getProducts();
     getQuantityUnits();
+    getQuantityUnitConversions();
   }
 
   useEffect(() => {
@@ -206,8 +232,10 @@ export function AddToGrocyPage() {
   }, [grocyKey, grocyBase]);
 
   useEffect(() => {
-    setIsLoaded(recipeLoaded && productsLoaded && unitsLoaded);
-  }, [recipeLoaded, productsLoaded, unitsLoaded]);
+    setIsLoaded(
+      recipeLoaded && productsLoaded && unitsLoaded && unitConversionsLoaded
+    );
+  }, [recipeLoaded, productsLoaded, unitsLoaded, unitConversionsLoaded]);
 
   useEffect(() => {
     console.log("Master map updated - new values:");
@@ -235,17 +263,41 @@ export function AddToGrocyPage() {
               {isLoaded ? (
                 <Fragment>
                   <h1>Add recipe to Grocy</h1>
-                  <TextField
-                    required
-                    label="Recipe Name"
-                    value={recipe?.name}
-                    onChange={(e) =>
-                      setRecipe((recipe) => {
-                        if (!recipe) return;
-                        return { ...recipe, name: e.target.value };
-                      })
-                    }
-                  />
+                  <Stack spacing={2}>
+                    <TextField
+                      required
+                      label="Recipe Name"
+                      value={recipe?.name}
+                      onChange={(e) =>
+                        setRecipe((recipe) => {
+                          if (!recipe) return;
+                          return { ...recipe, name: e.target.value };
+                        })
+                      }
+                    />
+                    <TextField
+                      required
+                      label="URL"
+                      value={recipe?.url}
+                      onChange={(e) =>
+                        setRecipe((recipe) => {
+                          if (!recipe) return;
+                          return { ...recipe, url: e.target.value };
+                        })
+                      }
+                    />
+                    <TextField
+                      required
+                      label="Image URL"
+                      value={recipe?.imageUrl}
+                      onChange={(e) =>
+                        setRecipe((recipe) => {
+                          if (!recipe) return;
+                          return { ...recipe, imageUrl: e.target.value };
+                        })
+                      }
+                    />
+                  </Stack>
                   <TableContainer>
                     <Table>
                       <TableHead>
@@ -271,6 +323,9 @@ export function AddToGrocyPage() {
                                   grocyBase={grocyBase}
                                   products={products}
                                   quantityUnits={quantityUnits}
+                                  quantityUnitConversions={
+                                    quantityUnitConversions
+                                  }
                                   isLoaded={isLoaded}
                                   updateMasterMap={updateMasterMap}
                                   refreshProducts={getProducts}
